@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AARRize - 対称スナップ（磁石）実装</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  :root { --panel-w: 360px; }
+  html,body { height:100%; margin:0; background:#111; color:#fff; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+  .header { display:flex; justify-content:space-between; align-items:center; padding:12px 20px; background:#000; border-bottom:1px solid #333; }
+  .main { display:flex; height:calc(100vh - 60px); gap:10px; padding:12px; box-sizing:border-box; }
+  .logo { flex:1; display:flex; align-items:center; justify-content:center; background:#1a1a1a; position:relative; border-radius:8px; padding:20px; }
+  .frameContainer { position:relative; width:512px; height:512px; display:inline-block; background:transparent; }
+  canvas#frameCanvas { display:block; width:100%; height:100%; background:transparent; border-radius:8px; }
+  canvas#guideCanvas { position:absolute; left:0; top:0; width:100%; height:100%; z-index:60; pointer-events:none; }
+  #assetLayer { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:auto; z-index:10; overflow:visible; }
+  .panel { width:var(--panel-w); background:#222; border-left:1px solid #333; overflow-y:auto; padding-bottom:20px; border-radius:8px; }
+  .actions-label, .settings-label { display:flex; align-items:center; gap:8px; padding:16px 20px 8px; font-size:0.875em; color:#aaa; text-transform:uppercase; font-weight:600; }
+  .actions { display:flex; gap:8px; padding:0 20px 16px; flex-wrap:wrap; }
+  .btn { background:#444; border:none; color:#fff; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:0.875em; }
+  .small { font-size:0.85em; padding:6px 8px; }
+  .asset { position:absolute; box-sizing:border-box; touch-action:none; user-select:none; cursor:move; transform-origin:top left; z-index:20; }
+  .asset img { display:block; width:100%; height:100%; object-fit:cover; border-radius:4px; pointer-events:none; }
+  .asset.selected { outline:2px dashed #90caf9; }
+  .handle { position:absolute; width:12px; height:12px; background:#fff; border-radius:2px; border:2px solid #333; box-sizing:border-box; cursor:nwse-resize; pointer-events:auto; z-index:30; }
+  .handle.tl { left:-8px; top:-8px; cursor:nwse-resize; }
+  .handle.tr { right:-8px; top:-8px; cursor:nesw-resize; }
+  .handle.bl { left:-8px; bottom:-8px; cursor:nesw-resize; }
+  .handle.br { right:-8px; bottom:-8px; cursor:nwse-resize; }
+  .num-panel { padding:8px 12px; background:#1a1a1a; margin:12px 16px; border-radius:6px; }
+  .num-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  .num-row input { width:100%; padding:6px; border-radius:4px; border:1px solid #333; background:#222; color:#fff; }
+  .readonly { background:#161616; color:#bbb; border-color:#2b2b2b; }
+  .hint { color:#aaa; font-size:0.85em; margin-top:8px; }
+  @media(max-width:900px){ .panel{ width:300px } .frameContainer{ width:380px;height:380px } }
+</style>
+</head>
+<body>
+  <div class="header">
+    <span>AARRize</span>
+    <span class="version">v1.6.0-snap-magnet</span>
+  </div>
+
+  <div class="main">
+    <div class="logo" id="logo">
+      <div class="frameContainer" id="frameContainer">
+        <canvas id="frameCanvas" width="512" height="512"></canvas>
+        <canvas id="guideCanvas"></canvas>
+        <div id="assetLayer" aria-label="Asset Layer"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="actions-label"><i class="fa-solid fa-hand-pointer"></i><span>操作</span></div>
+      <div class="actions">
+        <button class="btn small" id="addAssetBtn">画像を追加</button>
+        <button class="btn small" id="exportBtn">Export JSON</button>
+        <button class="btn small" id="importBtn">Import JSON</button>
+        <button class="btn small" id="downloadBtn">ダウンロード（PNG）</button>
+        <input type="file" id="assetInput" accept="image/*" style="display:none" multiple>
+      </div>
+
+      <div class="settings-label"><i class="fa-solid fa-gear"></i><span>編集</span></div>
+
+      <div style="padding:12px 16px;">
+        <div class="num-panel">
+          <div style="font-weight:700;margin-bottom:8px;">選択中の素材（編集用）</div>
+
+          <div class="num-row">
+            <label style="min-width:44px">X(px)</label>
+            <input type="number" id="numX" step="1">
+            <label style="min-width:44px">Y(px)</label>
+            <input type="number" id="numY" step="1">
+          </div>
+
+          <div class="num-row">
+            <label style="min-width:44px">W(px)</label>
+            <input type="number" id="numW" step="1">
+            <label style="min-width:44px">H(px)</label>
+            <input type="number" id="numH" step="1">
+          </div>
+
+          <div class="num-row">
+            <label style="min-width:44px">Xnorm</label>
+            <input type="number" id="numXn" step="0.0001">
+            <label style="min-width:44px">Ynorm</label>
+            <input type="number" id="numYn" step="0.0001">
+          </div>
+
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="btn small" id="applyBtn">適用</button>
+            <button class="btn small" id="deleteBtn">削除</button>
+          </div>
+
+          <div class="hint">
+            - ラインは <strong>完全に対称</strong> のときだけ表示します（少しでも外れると消えます）。<br>
+            - 対称位置に近づくと <strong>磁石スナップ</strong が働き、弱い操作では吸い付いたまま動きません。一定以上の強い操作で初めてスナップは破れます。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ------------------------
+   基本定義
+   ------------------------ */
+const canvas = document.getElementById('frameCanvas');
+const ctx = canvas.getContext('2d');
+const guideCanvas = document.getElementById('guideCanvas');
+const guideCtx = guideCanvas.getContext('2d');
+const frameContainer = document.getElementById('frameContainer');
+const assetLayer = document.getElementById('assetLayer');
+
+const CIRCLE_RADIUS_RATIO = 0.35;
+function getFrameCirclePx(widthPx){ return { cx: widthPx/2, cy: widthPx/2, r: widthPx * CIRCLE_RADIUS_RATIO }; }
+function drawFrameTo(ctxLocal, width, height){
+  ctxLocal.clearRect(0,0,width,height);
+  ctxLocal.save();
+  ctxLocal.beginPath();
+  ctxLocal.arc(width/2, height/2, width*0.47, 0, Math.PI*2);
+  ctxLocal.arc(width/2, height/2, width*0.35, Math.PI*2, 0, true);
+  ctxLocal.closePath();
+  ctxLocal.fillStyle = '#222';
+  ctxLocal.fill();
+  ctxLocal.restore();
+  ctxLocal.beginPath();
+  ctxLocal.arc(width/2, height/2, width*0.47, 0, Math.PI*2);
+  ctxLocal.strokeStyle = '#fff'; ctxLocal.lineWidth = 8; ctxLocal.stroke();
+  ctxLocal.beginPath();
+  ctxLocal.arc(width/2, height/2, width*0.35, 0, Math.PI*2);
+  ctxLocal.strokeStyle = '#fff'; ctxLocal.lineWidth = 4; ctxLocal.stroke();
+}
+drawFrameTo(ctx, canvas.width, canvas.height);
+
+/* guide canvas サイズ合わせ */
+function resizeGuideToContainer(){
+  const rect = frameContainer.getBoundingClientRect();
+  guideCanvas.width = rect.width;
+  guideCanvas.height = rect.height;
+  guideCanvas.style.width = rect.width + 'px';
+  guideCanvas.style.height = rect.height + 'px';
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+}
+function setAssetLayerSize(){
+  const rect = frameContainer.getBoundingClientRect();
+  assetLayer.style.width = rect.width + 'px';
+  assetLayer.style.height = rect.height + 'px';
+  assetLayer.style.left = '0px';
+  assetLayer.style.top = '0px';
+  resizeGuideToContainer();
+}
+setAssetLayerSize();
+window.addEventListener('resize', () => { setAssetLayerSize(); drawGuides(); });
+
+/* ------------------------
+   アセット管理（追加・数値など）
+   ------------------------ */
+const assetInput = document.getElementById('assetInput');
+const addAssetBtn = document.getElementById('addAssetBtn');
+const exportBtn = document.getElementById('exportBtn');
+const importBtn = document.getElementById('importBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+
+const numX = document.getElementById('numX');
+const numY = document.getElementById('numY');
+const numW = document.getElementById('numW');
+const numH = document.getElementById('numH');
+const numXn = document.getElementById('numXn');
+const numYn = document.getElementById('numYn');
+const applyBtn = document.getElementById('applyBtn');
+const deleteBtn = document.getElementById('deleteBtn');
+
+let assets = []; // {id, el, img, x,y,w,h}
+let selectedAssetId = null;
+let nextAssetId = 1;
+
+/* スナップ / 表示の閾値 */
+const strictTolerance = 1;   // 完全対称と見る厳密差 (px)
+const snapRange = 8;         // 近接していたら磁石で吸着する範囲 (px)
+const breakThreshold = 14;   // 吸着状態を破るための累積ポインタ移動量 (px)
+
+/* スナップ状態（ドラッグ中にのみ使う）： assetId -> snapState */
+let currentSnap = null;
+/* snapState の構造例:
+  {
+    assetId: 5,
+    type: 'mirror'|'centerX'|'centerY',
+    target: { cx: 200, cy: 256 } or single axis value,
+    startPointer: {x,y}, // pointer position when snap started (layer coords)
+    accumulatedPointerDelta: 0,
+    activeAxis: 'x'|'y'|'both'
+  }
+*/
+
+/* helper: layerRect */
+function getLayerRect(){ return assetLayer.getBoundingClientRect(); }
+function applyStyleToAssetObj(a){
+  a.el.style.left = a.x + 'px';
+  a.el.style.top  = a.y + 'px';
+  a.el.style.width = a.w + 'px';
+  a.el.style.height = a.h + 'px';
+}
+
+/* create asset */
+function createAssetFromImage(img){
+  const layerRect = getLayerRect();
+  const defaultSize = Math.min(layerRect.width, layerRect.height) * 0.25;
+  const a = { id: nextAssetId++, img, x: (layerRect.width - defaultSize)/2, y: (layerRect.height - defaultSize)/2, w: defaultSize, h: defaultSize };
+  const el = document.createElement('div');
+  el.className = 'asset'; el.style.position='absolute';
+  el.style.left = a.x + 'px'; el.style.top = a.y + 'px'; el.style.width = a.w + 'px'; el.style.height = a.h + 'px';
+  el.dataset.id = a.id;
+  const imgel = document.createElement('img'); imgel.src = img.src; el.appendChild(imgel);
+  ['tl','tr','bl','br'].forEach(pos => { const h = document.createElement('div'); h.className = 'handle ' + pos; h.dataset.dir = pos; el.appendChild(h); });
+  el.addEventListener('pointerdown', onAssetPointerDown);
+  el.addEventListener('dragstart', e=>e.preventDefault());
+  assetLayer.appendChild(el);
+  a.el = el; assets.push(a);
+  selectAsset(a.id); drawGuides();
+}
+
+addAssetBtn.addEventListener('click', () => assetInput.click());
+assetInput.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  for (const file of files){
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    await new Promise(r => { img.onload = r; img.src = url; });
+    createAssetFromImage(img);
+  }
+  assetInput.value = '';
+});
+
+/* Export/Import/Download (以前と互換) */
+exportBtn.addEventListener('click', () => {
+  const layerRect = getLayerRect();
+  const circle = getFrameCircleForLayer();
+  const out = assets.map(a => {
+    const cx_box = (a.x + a.w/2) / layerRect.width;
+    const cy_box = (a.y + a.h/2) / layerRect.height;
+    const wn = a.w / layerRect.width;
+    const hn = a.h / layerRect.height;
+    const cx_circle = ((a.x + a.w/2) - circle.cx) / circle.r;
+    const cy_circle = ((a.y + a.h/2) - circle.cy) / circle.r;
+    const visible_center = Math.hypot(cx_circle, cy_circle) <= 1;
+    return {
+      id: a.id, src: a.img.src,
+      x_px: Math.round(a.x), y_px: Math.round(a.y), w_px: Math.round(a.w), h_px: Math.round(a.h),
+      center_norm_box: { x: +(cx_box.toFixed(6)), y: +(cy_box.toFixed(6)) },
+      size_norm_box: { w: +(wn.toFixed(6)), h: +(hn.toFixed(6)) },
+      center_norm_circle: { x: +(cx_circle.toFixed(6)), y: +(cy_circle.toFixed(6)) },
+      visible_in_frame: visible_center
+    };
+  });
+  const json = JSON.stringify(out, null, 2);
+  navigator.clipboard?.writeText(json).then(()=> alert('配置データをクリップボードにコピーしました（JSON）'));
+});
+importBtn.addEventListener('click', async () => {
+  const txt = prompt('インポートするJSONを貼付けてください（Export JSONと互換）'); if (!txt) return;
+  try {
+    const arr = JSON.parse(txt); if (!Array.isArray(arr)) throw new Error('配列ではありません');
+    const layerRect = getLayerRect(); const circle = getFrameCircleForLayer();
+    for (const o of arr){
+      const img = new Image();
+      try { await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; img.src=o.src; }); } catch { continue; }
+      let w = (o.w_px!=null)?o.w_px:(o.size_norm_box?o.size_norm_box.w*layerRect.width:layerRect.width*0.2);
+      let h = (o.h_px!=null)?o.h_px:(o.size_norm_box?o.size_norm_box.h*layerRect.height:layerRect.height*0.2);
+      let x,y;
+      if (o.x_px!=null && o.y_px!=null){ x=o.x_px; y=o.y_px; }
+      else if (o.center_norm_box && o.center_norm_box.x!=null){ x=o.center_norm_box.x*layerRect.width - w/2; y=o.center_norm_box.y*layerRect.height - h/2; }
+      else if (o.center_norm_circle && o.center_norm_circle.x!=null){ x=(o.center_norm_circle.x*circle.r)+circle.cx - w/2; y=(o.center_norm_circle.y*circle.r)+circle.cy - h/2; }
+      else { x=(layerRect.width-w)/2; y=(layerRect.height-h)/2; }
+      const minX=-layerRect.width, maxX=layerRect.width*2, minY=-layerRect.height, maxY=layerRect.height*2;
+      x=Math.max(minX, Math.min(maxX, x)); y=Math.max(minY, Math.min(maxY, y)); w=Math.max(8, Math.min(layerRect.width*2,w)); h=Math.max(8, Math.min(layerRect.height*2,h));
+      const a = { id: nextAssetId++, img, x, y, w, h };
+      const el = document.createElement('div'); el.className='asset'; el.style.left=a.x+'px'; el.style.top=a.y+'px'; el.style.width=a.w+'px'; el.style.height=a.h+'px'; el.dataset.id=a.id;
+      const imgel = document.createElement('img'); imgel.src=img.src; el.appendChild(imgel);
+      ['tl','tr','bl','br'].forEach(pos=>{ const h=document.createElement('div'); h.className='handle '+pos; h.dataset.dir=pos; el.appendChild(h); });
+      el.addEventListener('pointerdown', onAssetPointerDown);
+      assetLayer.appendChild(el); a.el=el; assets.push(a);
+    }
+    drawGuides();
+  } catch (e){ alert('JSON読み込み失敗: '+ e.message); }
+});
+downloadBtn.addEventListener('click', () => {
+  const outW = canvas.width, outH = canvas.height;
+  const out = document.createElement('canvas'); out.width=outW; out.height=outH;
+  const outCtx = out.getContext('2d');
+  drawFrameTo(outCtx, outW, outH);
+  const layerRect = getLayerRect(); const scale = outW / layerRect.width;
+  const circleOut = getFrameCirclePx(outW);
+  outCtx.save(); outCtx.beginPath(); outCtx.arc(circleOut.cx, circleOut.cy, circleOut.r, 0, Math.PI*2); outCtx.clip();
+  for (const a of assets){ try { outCtx.drawImage(a.img, a.x*scale, a.y*scale, a.w*scale, a.h*scale); } catch(e){} }
+  outCtx.restore();
+  out.toBlob(function(blob){ const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='frame_export.png'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }, 'image/png');
+});
+
+/* ------------------------
+   選択 / 数値パネル / ポインタ（ここにスナップロジックを入れる）
+   ------------------------ */
+function selectAsset(id){
+  assets.forEach(a => a.el.classList.toggle('selected', a.id === id));
+  selectedAssetId = id; updateNumericPanel(); drawGuides();
+}
+function updateNumericPanel(){
+  const a = assets.find(x => x.id === selectedAssetId);
+  if (!a){ numX.value=''; numY.value=''; numW.value=''; numH.value=''; numXn.value=''; numYn.value=''; return; }
+  const layerRect = getLayerRect();
+  numX.value = Math.round(a.x); numY.value = Math.round(a.y); numW.value = Math.round(a.w); numH.value = Math.round(a.h);
+  const cx_box = (a.x + a.w/2) / layerRect.width; const cy_box = (a.y + a.h/2) / layerRect.height;
+  numXn.value = (Math.round(cx_box*10000)/10000).toFixed(4); numYn.value = (Math.round(cy_box*10000)/10000).toFixed(4);
+}
+
+/* pointer state */
+let pointerState = { mode:null, assetId:null, startPointer:{x:0,y:0}, startBox:{x:0,y:0,w:0,h:0} };
+
+/* helper: layer local coords of pointer */
+function pointerToLayer(e){
+  const rect = getLayerRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+/* compute centers */
+function computeCenters(){ return assets.map(a=>({ id: a.id, cx: a.x + a.w/2, cy: a.y + a.h/2, left: a.x, right: a.x+a.w, top: a.y, bottom: a.y+a.h })); }
+
+/* start drag */
+function onAssetPointerDown(e){
+  e.stopPropagation();
+  const el = e.currentTarget;
+  const id = Number(el.dataset.id);
+  selectAsset(id);
+  pointerState.mode = e.target.classList.contains('handle') ? 'resize' : 'move';
+  pointerState.assetId = id;
+  pointerState.startPointer = { x: e.clientX, y: e.clientY };
+  const a = assets.find(x=>x.id===id);
+  pointerState.startBox = { x: a.x, y: a.y, w: a.w, h: a.h };
+  // reset snap state
+  currentSnap = null;
+  (e.target).setPointerCapture && (e.target).setPointerCapture(e.pointerId);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp, { once:true });
+}
+
+/* helper: try to find a mirror snap candidate for asset a while dragging.
+   returns a snapState or null.
+   snapState: { type:'mirror'|'centerX'|'centerY', targetCx/targetCy, activeAxis }
+*/
+function findSnapCandidate(a, layerPointer){
+  const layerRect = getLayerRect();
+  const circle = getFrameCircleForLayer();
+  const centers = computeCenters().filter(c => c.id !== a.id);
+
+  // 1) center axis snap (align to frame center)
+  const a_cx = a.x + a.w/2;
+  const a_cy = a.y + a.h/2;
+  // if center x is within snapRange of frame.cx -> snap center x
+  if (Math.abs(a_cx - circle.cx) <= snapRange) {
+    return { type: 'centerX', targetCx: circle.cx, activeAxis: 'x', startPointer: layerPointer, accumulatedPointerDelta: 0 };
+  }
+  if (Math.abs(a_cy - circle.cy) <= snapRange) {
+    return { type: 'centerY', targetCy: circle.cy, activeAxis: 'y', startPointer: layerPointer, accumulatedPointerDelta: 0 };
+  }
+
+  // 2) mirror candidates: for each other asset b, compute mirrored center for a
+  for (const b of centers){
+    // mirrored X for horizontal mirror across frame center:
+    const mirroredCx = 2*circle.cx - b.cx;
+    const dx = Math.abs((a.x + a.w/2) - mirroredCx);
+    const dy = Math.abs((a.y + a.h/2) - b.cy); // vertical center should be close
+    if (dx <= snapRange && dy <= snapRange) {
+      return { type: 'mirror', axis: 'vertical', targetCx: mirroredCx, matchedWith: b.id, activeAxis: 'x', startPointer: layerPointer, accumulatedPointerDelta: 0 };
+    }
+    // mirrored Y for vertical mirror across frame center:
+    const mirroredCy = 2*circle.cy - b.cy;
+    const dy2 = Math.abs((a.y + a.h/2) - mirroredCy);
+    const dx2 = Math.abs((a.x + a.w/2) - b.cx);
+    if (dy2 <= snapRange && dx2 <= snapRange) {
+      return { type: 'mirror', axis: 'horizontal', targetCy: mirroredCy, matchedWith: b.id, activeAxis: 'y', startPointer: layerPointer, accumulatedPointerDelta: 0 };
+    }
+  }
+  return null;
+}
+
+/* onPointerMove: implement magnetic snap behavior */
+function onPointerMove(e){
+  if (!pointerState.mode) return;
+  const a = assets.find(x=>x.id===pointerState.assetId);
+  if (!a) return;
+  const layerRect = getLayerRect();
+  const layerPointer = pointerToLayer(e);
+  const dx = e.clientX - pointerState.startPointer.x;
+  const dy = e.clientY - pointerState.startPointer.y;
+
+  if (pointerState.mode === 'move'){
+    // predicted new pos without snap
+    let nx = pointerState.startBox.x + dx;
+    let ny = pointerState.startBox.y + dy;
+
+    // If we don't have a currentSnap, check if candidate exists
+    if (!currentSnap){
+      // Look for snap candidate for this asset based on its predicted position
+      // Temporarily set a.x/a.y to nx/ny to evaluate
+      const temp = { x: nx, y: ny, w: a.w, h: a.h };
+      const candidate = findSnapCandidate(temp, layerPointer);
+      if (candidate){
+        candidate.assetId = a.id;
+        currentSnap = candidate;
+        // Immediately apply exact snap so user feels "吸いつく"
+        if (candidate.activeAxis === 'x' && candidate.targetCx != null){
+          a.x = candidate.targetCx - a.w/2;
+        }
+        if (candidate.activeAxis === 'y' && candidate.targetCy != null){
+          a.y = candidate.targetCy - a.h/2;
+        }
+        applyStyleToAssetObj(a);
+        updateNumericPanel();
+        drawGuides();
+        return; // early return: we're snapped for now
+      }
+    } else {
+      // we are currently snapped. Decide whether to keep snap or break it.
+      // accumulate pointer travel since snap started (in layer coords)
+      const ddx = layerPointer.x - currentSnap.startPointer.x;
+      const ddy = layerPointer.y - currentSnap.startPointer.y;
+      const travel = Math.hypot(ddx, ddy);
+      currentSnap.accumulatedPointerDelta = travel;
+
+      // If travel exceeds breakThreshold -> break snap and resume free move
+      if (travel >= breakThreshold){
+        currentSnap = null;
+        // now fall through to normal move (update using current dx/dy)
+        nx = pointerState.startBox.x + dx;
+        ny = pointerState.startBox.y + dy;
+        // apply with loose clamping (allow outside)
+        const minX = -layerRect.width, maxX = layerRect.width*2, minY = -layerRect.height, maxY = layerRect.height*2;
+        a.x = Math.max(minX, Math.min(maxX, nx));
+        a.y = Math.max(minY, Math.min(maxY, ny));
+        applyStyleToAssetObj(a);
+        updateNumericPanel();
+        drawGuides();
+        return;
+      } else {
+        // still within snap: keep exact snap position (do not move)
+        return;
+      }
+    }
+
+    // no snap in effect: normal move
+    const minX = -layerRect.width, maxX = layerRect.width*2, minY = -layerRect.height, maxY = layerRect.height*2;
+    a.x = Math.max(minX, Math.min(maxX, nx));
+    a.y = Math.max(minY, Math.min(maxY, ny));
+    applyStyleToAssetObj(a);
+    updateNumericPanel();
+    drawGuides();
+  } else if (pointerState.mode === 'resize'){
+    // resizing: do normal resize, optionally could support snap to size but skip for now
+    let newW = pointerState.startBox.w, newH = pointerState.startBox.h, newX = pointerState.startBox.x, newY = pointerState.startBox.y;
+    const dir = (e.target && e.target.dataset && e.target.dataset.dir) ? e.target.dataset.dir : pointerState.dir;
+    if (dir === 'br'){
+      newW = Math.max(24, pointerState.startBox.w + dx);
+      newH = Math.max(24, pointerState.startBox.h + dy);
+    } else if (dir === 'tl'){
+      newW = Math.max(24, pointerState.startBox.w - dx);
+      newH = Math.max(24, pointerState.startBox.h - dy);
+      newX = pointerState.startBox.x + dx;
+      newY = pointerState.startBox.y + dy;
+    } else if (dir === 'tr'){
+      newW = Math.max(24, pointerState.startBox.w + dx);
+      newH = Math.max(24, pointerState.startBox.h - dy);
+      newY = pointerState.startBox.y + dy;
+    } else if (dir === 'bl'){
+      newW = Math.max(24, pointerState.startBox.w - dx);
+      newH = Math.max(24, pointerState.startBox.h + dy);
+      newX = pointerState.startBox.x + dx;
+    }
+    const minX = -layerRect.width, maxX = layerRect.width*2, minY = -layerRect.height, maxY = layerRect.height*2;
+    newX = Math.max(minX, Math.min(maxX - newW, newX));
+    newY = Math.max(minY, Math.min(maxY - newH, newY));
+    newW = Math.max(24, Math.min(layerRect.width*2, newW));
+    newH = Math.max(24, Math.min(layerRect.height*2, newH));
+    a.x = newX; a.y = newY; a.w = newW; a.h = newH;
+    applyStyleToAssetObj(a);
+    updateNumericPanel();
+    drawGuides();
+  }
+}
+
+/* pointer up: clear snap state (snap may remain if exact symmetry holds and user stops) */
+function onPointerUp(e){
+  // If we were snapped but the snap resulted in exact symmetry, that's fine: guide will show (strict check)
+  // But we clear transient snap state so next drag can re-evaluate
+  pointerState.mode = null; pointerState.assetId = null; pointerState.startPointer = {x:0,y:0}; pointerState.startBox = {x:0,y:0,w:0,h:0};
+  currentSnap = null;
+  window.removeEventListener('pointermove', onPointerMove);
+  drawGuides();
+}
+
+assetLayer.addEventListener('pointerdown', (e) => {
+  if (e.target === assetLayer) {
+    assets.forEach(a => a.el.classList.remove('selected'));
+    selectedAssetId = null;
+    updateNumericPanel();
+    drawGuides();
+  }
+});
+
+/* 数値適用 */
+applyBtn.addEventListener('click', () => {
+  const a = assets.find(x=>x.id===selectedAssetId);
+  if (!a) return;
+  const layerRect = getLayerRect();
+  const xn = parseFloat(numXn.value);
+  const yn = parseFloat(numYn.value);
+  if (!isNaN(xn) && !isNaN(yn)){
+    a.x = xn * layerRect.width - a.w/2;
+    a.y = yn * layerRect.height - a.h/2;
+  }
+  const px = parseFloat(numX.value);
+  const py = parseFloat(numY.value);
+  const pw = parseFloat(numW.value);
+  const ph = parseFloat(numH.value);
+  if (!isNaN(px)) a.x = px;
+  if (!isNaN(py)) a.y = py;
+  if (!isNaN(pw)) a.w = Math.max(8, pw);
+  if (!isNaN(ph)) a.h = Math.max(8, ph);
+  const layer = getLayerRect();
+  const minX = -layer.width, maxX = layer.width*2, minY = -layer.height, maxY = layer.height*2;
+  a.x = Math.max(minX, Math.min(maxX, a.x));
+  a.y = Math.max(minY, Math.min(maxY, a.y));
+  applyStyleToAssetObj(a);
+  updateNumericPanel();
+  drawGuides();
+});
+
+/* ------------------------
+   ガイド描画（ラインは strictTolerance のときのみ出す）
+   ------------------------ */
+function clearGuides(){ guideCtx.clearRect(0,0,guideCanvas.width, guideCanvas.height); }
+function drawVerticalLine(xPx, strong=false){
+  guideCtx.save(); guideCtx.beginPath(); guideCtx.lineWidth = strong ? 2.5 : 1.5; guideCtx.strokeStyle = strong ? '#ffd700' : '#00e5ff'; guideCtx.setLineDash(strong ? [4,4] : [6,6]);
+  guideCtx.moveTo(xPx+0.5, 0); guideCtx.lineTo(xPx+0.5, guideCanvas.height); guideCtx.stroke(); guideCtx.restore();
+}
+function drawHorizontalLine(yPx, strong=false){
+  guideCtx.save(); guideCtx.beginPath(); guideCtx.lineWidth = strong ? 2.5 : 1.5; guideCtx.strokeStyle = strong ? '#ffd700' : '#00e5ff'; guideCtx.setLineDash(strong ? [4,4] : [6,6]);
+  guideCtx.moveTo(0, yPx+0.5); guideCtx.lineTo(guideCanvas.width, yPx+0.5); guideCtx.stroke(); guideCtx.restore();
+}
+function drawCenterMarker(cx, cy){ guideCtx.save(); guideCtx.fillStyle = '#ffd700'; guideCtx.beginPath(); guideCtx.arc(cx, cy, 4, 0, Math.PI*2); guideCtx.fill(); guideCtx.restore(); }
+
+function getFrameCircleForLayer(){ const layerRect = getLayerRect(); return { cx: layerRect.width/2, cy: layerRect.height/2, r: layerRect.width * CIRCLE_RADIUS_RATIO }; }
+
+/* drawGuides: strict 判定のみでライン表示（ロックはしない） */
+function drawGuides(){
+  clearGuides();
+  const layerRect = getLayerRect(); if (!layerRect.width || !layerRect.height) return;
+  const centers = computeCenters();
+  const circle = getFrameCircleForLayer();
+
+  guideCtx.lineWidth = 1.5; guideCtx.setLineDash([6,6]); guideCtx.strokeStyle = '#00e5ff'; guideCtx.fillStyle = '#00e5ff';
+
+  // check pairwise strict symmetry (exact within strictTolerance)
+  for (let i=0;i<centers.length;i++){
+    for (let j=i+1;j<centers.length;j++){
+      const a = centers[i], b = centers[j];
+      // vertical mirror (左右対称): (a.cx - center) + (b.cx - center) === 0 and y close
+      const sumX = (a.cx - circle.cx) + (b.cx - circle.cx);
+      const yDiff = Math.abs(a.cy - b.cy);
+      if (Math.abs(sumX) <= strictTolerance && yDiff <= strictTolerance){
+        drawVerticalLine(circle.cx, true);
+        drawCenterMarker(a.cx, a.cy);
+        drawCenterMarker(b.cx, b.cy);
+      }
+      // horizontal mirror
+      const sumY = (a.cy - circle.cy) + (b.cy - circle.cy);
+      const xDiff = Math.abs(a.cx - b.cx);
+      if (Math.abs(sumY) <= strictTolerance && xDiff <= strictTolerance){
+        drawHorizontalLine(circle.cy, true);
+        drawCenterMarker(a.cx, a.cy);
+        drawCenterMarker(b.cx, b.cy);
+      }
+    }
+  }
+
+  // also check if a single selected asset is exactly centered to frame
+  if (selectedAssetId != null){
+    const sel = assets.find(x=>x.id===selectedAssetId);
+    if (sel){
+      const selCx = sel.x + sel.w/2, selCy = sel.y + sel.h/2;
+      if (Math.abs(selCx - circle.cx) <= strictTolerance) drawVerticalLine(circle.cx, true);
+      if (Math.abs(selCy - circle.cy) <= strictTolerance) drawHorizontalLine(circle.cy, true);
+    }
+  }
+}
+
+/* 初期描画 */
+drawGuides();
+
+</script>
+</body>
+</html>
