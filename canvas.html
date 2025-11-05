@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Canvas画像再現コード生成ツール</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f8f9fa;
+    }
+    .container {
+      background: white;
+      border-radius: 10px;
+      padding: 25px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #2c3e50;
+      text-align: center;
+      margin-bottom: 5px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #6c757d;
+      margin-bottom: 25px;
+    }
+    .upload-area {
+      border: 2px dashed #3498db;
+      border-radius: 8px;
+      padding: 35px 20px;
+      text-align: center;
+      background: #f8fafc;
+      margin-bottom: 20px;
+      transition: all 0.3s;
+    }
+    .upload-area:hover {
+      background: #e3f2fd;
+      border-color: #2980b9;
+    }
+    #uploader {
+      display: none;
+    }
+    .upload-label {
+      display: inline-block;
+      padding: 12px 28px;
+      background: #3498db;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 16px;
+      transition: background 0.2s;
+    }
+    .upload-label:hover {
+      background: #2980b9;
+    }
+    .preview-area {
+      margin: 25px 0;
+      text-align: center;
+    }
+    canvas {
+      max-width: 100%;
+      border: 1px solid #dee2e6;
+      border-radius: 5px;
+      background: 
+        repeating-conic-gradient(#f0f0f0 0% 25%, white 0% 50%) 
+        50% / 20px 20px;
+    }
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin: 20px 0;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 12px 25px;
+      font-size: 15px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #generateBtn {
+      background: #2ecc71;
+      color: white;
+    }
+    #generateBtn:hover {
+      background: #27ae60;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(46, 204, 113, 0.3);
+    }
+    #resetBtn {
+      background: #e74c3c;
+      color: white;
+    }
+    #resetBtn:hover {
+      background: #c0392b;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(231, 76, 60, 0.3);
+    }
+    .code-container {
+      margin-top: 30px;
+      border: 1px solid #dee2e6;
+      border-radius: 5px;
+      padding: 15px;
+      background: #f8f9fa;
+      max-height: 300px;
+      overflow: auto;
+      position: relative;
+    }
+    .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .code-title {
+      font-weight: 600;
+      color: #2c3e50;
+    }
+    #copyBtn {
+      background: #3498db;
+      color: white;
+      padding: 8px 15px;
+      font-size: 14px;
+    }
+    pre {
+      margin: 0;
+      padding: 15px;
+      background: white;
+      border-radius: 4px;
+      font-size: 14px;
+      line-height: 1.4;
+      overflow-x: auto;
+    }
+    .hidden {
+      display: none;
+    }
+    .file-info {
+      text-align: center;
+      margin-top: 10px;
+      color: #6c757d;
+      font-size: 14px;
+    }
+    .info-panel {
+      background: #e8f4fc;
+      border-left: 4px solid #3498db;
+      padding: 12px;
+      border-radius: 0 5px 5px 0;
+      margin-top: 20px;
+      font-size: 14px;
+    }
+    .icon {
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Canvas画像再現コード生成ツール</h1>
+    <p class="subtitle">アップロードした画像をCanvasで再現するJavaScriptコードを生成</p>
+    
+    <div class="upload-area">
+      <input type="file" id="uploader" accept="image/*">
+      <label for="uploader" class="upload-label">
+        <span class="icon">📁</span>
+        <span>画像を選択</span>
+      </label>
+      <p style="margin-top: 15px; color: #6c757d;">JPEG, PNG, GIF, WebP, BMP対応</p>
+    </div>
+
+    <div class="preview-area">
+      <canvas id="preview"></canvas>
+      <div class="file-info" id="fileInfo"></div>
+      
+      <div class="controls">
+        <button id="generateBtn" class="hidden">
+          <span class="icon">💻</span>
+          <span>再現代碼を生成</span>
+        </button>
+        <button id="resetBtn" class="hidden">
+          <span class="icon">🔄</span>
+          <span>リセット</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="code-container hidden" id="codeContainer">
+      <div class="code-header">
+        <div class="code-title">Canvas再現代碼 (JavaScript)</div>
+        <button id="copyBtn">
+          <span class="icon">📋</span>
+          <span>コードをコピー</span>
+        </button>
+      </div>
+      <pre id="codeOutput"></pre>
+    </div>
+
+    <div class="info-panel">
+      <strong>このツールの特徴:</strong>
+      <ul>
+        <li>画像をCanvasで完全再現するJavaScriptコードを生成</li>
+        <li>生成コードはCanvas要素と画像描画ロジックのみ</li>
+        <li>ピクセル単位で正確に再現</li>
+        <li>コード内に画像データをBase64形式で埋め込み</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // 要素の取得
+    const canvas = document.getElementById('preview');
+    const ctx = canvas.getContext('2d');
+    const uploader = document.getElementById('uploader');
+    const generateBtn = document.getElementById('generateBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const codeContainer = document.getElementById('codeContainer');
+    const codeOutput = document.getElementById('codeOutput');
+    const copyBtn = document.getElementById('copyBtn');
+    const fileInfo = document.getElementById('fileInfo');
+    
+    // 画像データを保持する変数
+    let imageDataURL = '';
+    let originalFilename = '';
+
+    // 初期化: Canvasのサイズを設定
+    canvas.width = 300;
+    canvas.height = 150;
+
+    // 画像アップロード処理
+    uploader.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file || !file.type.match('image.*')) return;
+      
+      originalFilename = file.name;
+      fileInfo.textContent = `ファイル名: ${file.name} | サイズ: ${formatFileSize(file.size)}`;
+      
+      const reader = new FileReader();
+      
+      reader.onload = function(event) {
+        imageDataURL = event.target.result;
+        
+        const img = new Image();
+        img.onload = function() {
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+          
+          generateBtn.classList.remove('hidden');
+          resetBtn.classList.remove('hidden');
+        };
+        img.src = imageDataURL;
+      };
+      
+      reader.readAsDataURL(file);
+    });
+
+    // ファイルサイズをフォーマットする関数
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // コード生成処理
+    generateBtn.addEventListener('click', function() {
+      if (!imageDataURL) return;
+      
+      // Canvas再現コードのテンプレート
+      const code = `// Canvas要素を作成
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+
+// 画像データ
+const imageData = "${imageDataURL}";
+
+// 画像読み込み
+const img = new Image();
+img.onload = function() {
+  // Canvasサイズを画像サイズに設定
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  
+  // Canvasに画像を描画
+  ctx.drawImage(img, 0, 0);
+  
+  // Canvasをドキュメントに追加
+  document.body.appendChild(canvas);
+  
+  // オプション: スタイルを適用
+  canvas.style.maxWidth = '100%';
+  canvas.style.border = '1px solid #ddd';
+  canvas.style.boxShadow = '0 4px 10px rgba(0,0,0,0.1)';
+};
+img.src = imageData;`;
+      
+      codeOutput.textContent = code;
+      codeContainer.classList.remove('hidden');
+      
+      // ページをコードエリアまでスクロール
+      codeContainer.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // コードコピー処理
+    copyBtn.addEventListener('click', function() {
+      const textArea = document.createElement('textarea');
+      textArea.value = codeOutput.textContent;
+      document.body.appendChild(textArea);
+      textArea.select();
+      
+      try {
+        const successful = document.execCommand('copy');
+        const msg = successful ? 'コードをコピーしました！' : 'コピーに失敗しました';
+        alert(msg);
+      } catch (err) {
+        alert('このブラウザではコピー機能がサポートされていません');
+      }
+      
+      document.body.removeChild(textArea);
+    });
+
+    // リセット処理
+    resetBtn.addEventListener('click', function() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      canvas.width = 300;
+      canvas.height = 150;
+      uploader.value = '';
+      imageDataURL = '';
+      originalFilename = '';
+      fileInfo.textContent = '';
+      
+      generateBtn.classList.add('hidden');
+      resetBtn.classList.add('hidden');
+      codeContainer.classList.add('hidden');
+    });
+  </script>
+</body>
+</html>
