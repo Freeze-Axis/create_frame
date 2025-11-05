@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>画像色変換デモ</title>
+  <style>
+    body { background: #222; color: #fff; font-family: sans-serif; text-align: center; }
+    .color-bar { margin: 24px auto 16px; width: 220px; display: flex; gap: 8px; }
+    .color-bar input[type="color"] { width: 40px; height: 40px; border: none; }
+    .color-bar input[type="range"] { width: 120px; }
+    #imgArea { margin: 24px auto; background: #111; display: inline-block; padding: 16px; border-radius: 8px; }
+    canvas { max-width: 400px; max-height: 400px; background: #fff; border-radius: 8px; }
+    #upload { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h2>画像の色をグラデーションで変換</h2>
+  <div class="color-bar">
+    <input type="color" id="color1" value="#ffffff">
+    <input type="color" id="color2" value="#ff0000">
+    <input type="range" id="angle" min="0" max="360" value="0">
+    <span id="angleVal">0°</span>
+  </div>
+  <!-- 塗りつぶしボタン削除 -->
+  <input type="file" id="upload" accept="image/*">
+  <div id="imgArea">
+    <canvas id="canvas" width="400" height="400"></canvas>
+  </div>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let img = new Image();
+    let imgLoaded = false;
+    let gradColors = [document.getElementById('color1').value, document.getElementById('color2').value];
+    let gradAngle = 0;
+
+    function hexToRgb(hex) {
+      hex = hex.replace('#', '');
+      if (hex.length === 3) hex = hex.split('').map(x=>x+x).join('');
+      const num = parseInt(hex, 16);
+      return [num >> 16 & 255, num >> 8 & 255, num & 255];
+    }
+
+    function applyGradientToImage() {
+      if (!imgLoaded) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 画像を中央に描画
+      const scale = Math.min(canvas.width/img.naturalWidth, canvas.height/img.naturalHeight, 1);
+      const w = img.naturalWidth * scale;
+      const h = img.naturalHeight * scale;
+      const x = (canvas.width - w) / 2;
+      const y = (canvas.height - h) / 2;
+      ctx.drawImage(img, x, y, w, h);
+      // ピクセル操作
+      let imgData = ctx.getImageData(x, y, w, h);
+      let data = imgData.data;
+
+      // グラデーション方向
+      const rad = gradAngle * Math.PI / 180;
+      const gx0 = 0, gy0 = 0;
+      const gx1 = w * Math.cos(rad), gy1 = h * Math.sin(rad);
+      for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+          const i = (py * w + px) * 4;
+          if (data[i+3] === 0) continue;
+          // グラデーション位置
+          let t = (px * Math.cos(rad) + py * Math.sin(rad)) / (w * Math.abs(Math.cos(rad)) + h * Math.abs(Math.sin(rad)));
+          t = Math.max(0, Math.min(1, t));
+          const rgb1 = hexToRgb(gradColors[0]);
+          const rgb2 = hexToRgb(gradColors[1]);
+          // 完全な塗りつぶし（元画像0%、グラデーション100%）
+          const r = rgb1[0] + (rgb2[0] - rgb1[0]) * t;
+          const g = rgb1[1] + (rgb2[1] - rgb1[1]) * t;
+          const b = rgb1[2] + (rgb2[2] - rgb1[2]) * t;
+          data[i]   = r;
+          data[i+1] = g;
+          data[i+2] = b;
+        }
+      }
+      ctx.putImageData(imgData, x, y);
+    }
+
+    document.getElementById('upload').addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        img.onload = function() {
+          imgLoaded = true;
+          // canvasサイズを画像サイズに合わせる
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          applyGradientToImage();
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById('color1').addEventListener('input', e => {
+      gradColors[0] = e.target.value;
+      applyGradientToImage();
+    });
+    document.getElementById('color2').addEventListener('input', e => {
+      gradColors[1] = e.target.value;
+      applyGradientToImage();
+    });
+    document.getElementById('angle').addEventListener('input', e => {
+      gradAngle = parseInt(e.target.value);
+      document.getElementById('angleVal').textContent = gradAngle + '°';
+      applyGradientToImage();
+    });
+  // 塗りつぶしモードのイベント削除
+  </script>
+</body>
+</html>
